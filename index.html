@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BigBase抽獎系統</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<style>
+  @keyframes spin-names {
+    0% { transform: translateY(0); }
+    100% { transform: translateY(-100%); }
+  }
+  .spinning {
+    animation: spin-names 0.1s linear infinite;
+  }
+  .winner-reveal {
+    animation: pulse 0.6s ease-out;
+  }
+  @keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.15); }
+    100% { transform: scale(1); }
+  }
+  .confetti {
+    position: fixed;
+    pointer-events: none;
+    z-index: 9999;
+  }
+  .prize-item.dragging {
+    opacity: 0.4;
+  }
+  .prize-item.drag-over {
+    border-color: #f59e0b;
+    background-color: #fef3c7;
+  }
+</style>
+</head>
+<body class="bg-gradient-to-br from-slate-50 to-blue-50 min-h-screen">
+<div class="max-w-7xl mx-auto p-4 md:p-6">
+  <header class="text-center mb-8">
+    <h1 class="text-4xl md:text-5xl font-bold text-orange-500 leading-tight py-1">🎉 Bigbase抽獎系統</h1>
+    <p class="text-gray-600 mt-2">設定獎項順序（可拖移）、匯入獎項與人員、可重複中獎</p>
+  </header>
+
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <!-- 左側：設定 -->
+    <div class="space-y-6">
+      <!-- 獎項設定 -->
+      <div class="bg-white rounded-2xl shadow-lg p-6 border border-amber-100">
+        <h2 class="text-2xl font-bold text-amber-700 mb-4 flex items-center gap-2">🏆 獎項設定 <span class="text-sm font-normal text-gray-500">（可拖移調整順序）</span></h2>
+        <div class="flex flex-wrap gap-3 mb-4">
+          <input id="prizeName" type="text" placeholder="獎項名稱" class="flex-1 min-w-[140px] px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-400 outline-none">
+          <input id="prizeQty" type="number" min="1" value="1" placeholder="數量" class="w-24 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-400 outline-none">
+          <button onclick="addPrize()" class="px-5 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-medium transition">新增獎項</button>
+        </div>
+        <div class="flex items-center gap-3 mb-4">
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input type="file" id="prizeFile" accept=".xlsx,.xls,.csv" class="hidden" onchange="importPrizes(this)">
+            <span onclick="document.getElementById('prizeFile').click()" class="px-5 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg font-medium cursor-pointer transition">📂 匯入獎項 Excel / CSV</span>
+          </label>
+          <span class="text-sm text-gray-500">第一欄獎項名稱，第二欄數量</span>
+        </div>
+        <div id="prizeList" class="space-y-2 max-h-64 overflow-y-auto"></div>
+      </div>
+
+      <!-- 抽獎人員 -->
+      <div class="bg-white rounded-2xl shadow-lg p-6 border border-blue-100">
+        <h2 class="text-2xl font-bold text-blue-700 mb-4">👥 抽獎人員</h2>
+        <div class="flex flex-wrap gap-3 mb-4">
+          <input id="personName" type="text" placeholder="姓名" class="flex-1 min-w-[120px] px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 outline-none">
+          <input id="personWeight" type="number" min="0.1" step="0.1" value="1" placeholder="權重" class="w-24 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 outline-none">
+          <button onclick="addPerson()" class="px-5 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-medium transition">新增人員</button>
+        </div>
+        <div class="flex items-center gap-3 mb-4">
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input type="file" id="excelFile" accept=".xlsx,.xls,.csv" class="hidden" onchange="importExcel(this)">
+            <span onclick="document.getElementById('excelFile').click()" class="px-5 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg font-medium cursor-pointer transition">📂 匯入人員 Excel / CSV</span>
+          </label>
+          <span class="text-sm text-gray-500">第一欄姓名，第二欄權重（可選）</span>
+        </div>
+        <div class="flex items-center gap-4 mb-3">
+          <label class="flex items-center gap-2">
+            <input type="checkbox" id="allowRepeat" checked class="w-4 h-4 text-blue-600 rounded">
+            <span class="font-medium">允許重複中獎（中獎後權重自動 -1）</span>
+          </label>
+          <button onclick="clearPeople()" class="text-sm text-red-500 hover:text-red-700">清空人員</button>
+        </div>
+        <div id="peopleList" class="space-y-1 max-h-72 overflow-y-auto text-sm"></div>
+        <div id="peopleStats" class="mt-3 text-sm text-gray-600"></div>
+      </div>
+    </div>
+
+    <!-- 右側：抽獎與結果 -->
+    <div class="space-y-6">
+      <!-- 抽獎區 -->
+      <div class="bg-white rounded-2xl shadow-lg p-6 border border-rose-100">
+        <h2 class="text-2xl font-bold text-rose-600 mb-4">🎰 抽獎</h2>
+        <div id="currentPrizeInfo" class="mb-4 p-4 bg-rose-50 rounded-xl text-center">
+          <div class="text-gray-500">目前獎項</div>
+          <div id="currentPrizeName" class="text-3xl font-bold text-rose-700 mt-1">尚未設定</div>
+          <div id="currentPrizeRemain" class="text-lg text-gray-600 mt-1"></div>
+        </div>
+        <div id="drawDisplay" class="h-32 flex items-center justify-center bg-gradient-to-r from-rose-50 to-amber-50 rounded-xl mb-4 overflow-hidden border-2 border-dashed border-rose-200">
+          <div id="displayName" class="text-4xl font-bold text-gray-800 text-center px-4">點擊開始抽獎</div>
+        </div>
+        <div class="flex flex-wrap gap-3 justify-center">
+          <button id="drawBtn" onclick="drawOne()" class="px-8 py-3 bg-gradient-to-r from-rose-500 to-amber-500 hover:from-rose-600 hover:to-amber-600 text-white text-xl font-bold rounded-xl shadow-lg transition disabled:opacity-50">抽取一位</button>
+          <button id="drawAllBtn" onclick="drawAllRemaining()" class="px-6 py-3 bg-rose-600 hover:bg-rose-700 text-white font-medium rounded-xl transition disabled:opacity-50">抽完此獎項</button>
+        </div>
+      </div>
+
+      <!-- 已抽獎項 -->
+      <div class="bg-white rounded-2xl shadow-lg p-6 border border-green-100">
+        <div class="flex justify-between items-center mb-4">
+          <h2 class="text-2xl font-bold text-green-700">✅ 已抽獎項</h2>
+          <button onclick="exportResults()" class="text-sm px-4 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg">匯出結果</button>
+        </div>
+        <div id="drawnList" class="space-y-3 max-h-80 overflow-y-auto"></div>
+      </div>
+
+      <!-- 控制 -->
+      <div class="flex flex-wrap gap-3 justify-center">
+        <button onclick="resetAll()" class="px-5 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg">全部重置</button>
+        <button onclick="clearResults()" class="px-5 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-lg">清除抽獎結果</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let prizes = [];
+let people = [];
+let drawnPrizes = [];
+let nextId = 1;
+let isDrawing = false;
+let dragSrcIndex = null;
+
+function uid() { return nextId++; }
+
+function save() {
+  localStorage.setItem('lotteryData', JSON.stringify({ prizes, people, drawnPrizes, nextId, allowRepeat: document.getElementById('allowRepeat').checked }));
+}
+function load() {
+  const data = localStorage.getItem('lotteryData');
+  if (data) {
+    const d = JSON.parse(data);
+    prizes = d.prizes || [];
+    people = d.people || [];
+    drawnPrizes = d.drawnPrizes || [];
+    nextId = d.nextId || 1;
+    document.getElementById('allowRepeat').checked = d.allowRepeat !== false;
+  }
+  renderAll();
+}
+
+function addPrize() {
+  const name = document.getElementById('prizeName').value.trim();
+  const qty = parseInt(document.getElementById('prizeQty').value) || 1;
+  if (!name) return alert('請輸入獎項名稱');
+  prizes.push({ id: uid(), name, quantity: qty, remaining: qty, winners: [] });
+  document.getElementById('prizeName').value = '';
+  document.getElementById('prizeQty').value = '1';
+  save();
+  renderAll();
+}
+
+function removePrize(id) {
+  prizes = prizes.filter(p => p.id !== id);
+  save();
+  renderAll();
+}
+
+function movePrize(id, dir) {
+  const idx = prizes.findIndex(p => p.id === id);
+  if (idx < 0) return;
+  const newIdx = idx + dir;
+  if (newIdx < 0 || newIdx >= prizes.length) return;
+  [prizes[idx], prizes[newIdx]] = [prizes[newIdx], prizes[idx]];
+  save();
+  renderAll();
+}
+
+function moveToFront(id) {
+  const idx = prizes.findIndex(p => p.id === id);
+  if (idx <= 0) return;
+  const [item] = prizes.splice(idx, 1);
+  prizes.unshift(item);
+  save();
+  renderAll();
+}
+
+function addPerson() {
+  const name = document.getElementById('personName').value.trim();
+  const weight = parseFloat(document.getElementById('personWeight').value) || 1;
+  if (!name) return alert('請輸入姓名');
+  people.push({ id: uid(), name, weight });
+  document.getElementById('personName').value = '';
+  document.getElementById('personWeight').value = '1';
+  save();
+  renderAll();
+}
+
+function removePerson(id) {
+  people = people.filter(p => p.id !== id);
+  save();
+  renderAll();
+}
+
+function updateWeight(id, val) {
+  const p = people.find(x => x.id === id);
+  if (p) p.weight = parseFloat(val) || 1;
+  save();
+  renderPeople();
+}
+
+function clearPeople() {
+  if (confirm('確定清空所有抽獎人員？')) {
+    people = [];
+    save();
+    renderAll();
+  }
+}
+
+function importExcel(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const data = new Uint8Array(e.target.result);
+      const wb = XLSX.read(data, { type: 'array' });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+      if (!rows.length) return alert('檔案沒有資料');
+
+      let nameCol = 0, weightCol = -1;
+      const header = rows[0].map(h => String(h).trim().toLowerCase());
+      const nameKeys = ['姓名', '名字', 'name', '名稱', '人員'];
+      const weightKeys = ['權重', 'weight', '機率', '倍率'];
+      header.forEach((h, i) => {
+        if (nameKeys.some(k => h.includes(k.toLowerCase()))) nameCol = i;
+        if (weightKeys.some(k => h.includes(k.toLowerCase()))) weightCol = i;
+      });
+
+      const start = (header.some(h => nameKeys.some(k => h.includes(k.toLowerCase())) || weightKeys.some(k => h.includes(k.toLowerCase())))) ? 1 : 0;
+      let added = 0;
+      for (let i = start; i < rows.length; i++) {
+        const row = rows[i];
+        const name = String(row[nameCol] || '').trim();
+        if (!name) continue;
+        let weight = 1;
+        if (weightCol >= 0 && row[weightCol] !== '') {
+          weight = parseInt(row[weightCol]) || 1;
+        }
+        people.push({ id: uid(), name, weight });
+        added++;
+      }
+      alert(`成功匯入 ${added} 位人員`);
+      save();
+      renderAll();
+    } catch (err) {
+      alert('讀取檔案失敗：' + err.message);
+    }
+    input.value = '';
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function importPrizes(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const data = new Uint8Array(e.target.result);
+      const wb = XLSX.read(data, { type: 'array' });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+      if (!rows.length) return alert('檔案沒有資料');
+
+      let nameCol = 0, qtyCol = -1;
+      const header = rows[0].map(h => String(h).trim().toLowerCase());
+      const nameKeys = ['獎項', '名稱', 'name', '獎品', '項目'];
+      const qtyKeys = ['數量', 'qty', 'quantity', '名額', '人數'];
+      header.forEach((h, i) => {
+        if (nameKeys.some(k => h.includes(k.toLowerCase()))) nameCol = i;
+        if (qtyKeys.some(k => h.includes(k.toLowerCase()))) qtyCol = i;
+      });
+
+      const start = (header.some(h => nameKeys.some(k => h.includes(k.toLowerCase())) || qtyKeys.some(k => h.includes(k.toLowerCase())))) ? 1 : 0;
+      let added = 0;
+      for (let i = start; i < rows.length; i++) {
+        const row = rows[i];
+        const name = String(row[nameCol] || '').trim();
+        if (!name) continue;
+        let qty = 1;
+        if (qtyCol >= 0 && row[qtyCol] !== '') {
+          qty = parseInt(row[qtyCol]) || 1;
+        }
+        prizes.push({ id: uid(), name, quantity: qty, remaining: qty, winners: [] });
+        added++;
+      }
+      alert(`成功匯入 ${added} 個獎項`);
+      save();
+      renderAll();
+    } catch (err) {
+      alert('讀取檔案失敗：' + err.message);
+    }
+    input.value = '';
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function getCurrentPrize() {
+  return prizes.find(p => p.remaining > 0);
+}
+
+function weightedRandom(pool) {
+  if (!pool.length) return null;
+  const total = pool.reduce((s, p) => s + Math.max(0, p.weight), 0);
+  if (total <= 0) return pool[Math.floor(Math.random() * pool.length)];
+  let r = Math.random() * total;
+  for (const p of pool) {
+    r -= Math.max(0, p.weight);
+    if (r <= 0) return p;
+  }
+  return pool[pool.length - 1];
+}
+
+function getPool() {
+  const allow = document.getElementById('allowRepeat').checked;
+  if (allow) return people.filter(p => p.weight > 0);
+  const wonNames = new Set();
+  drawnPrizes.forEach(dp => dp.winners.forEach(w => wonNames.add(w)));
+  prizes.forEach(p => p.winners.forEach(w => wonNames.add(w)));
+  return people.filter(p => p.weight > 0 && !wonNames.has(p.name));
+}
+
+async function drawOne() {
+  if (isDrawing) return;
+  const prize = getCurrentPrize();
+  if (!prize) return alert('所有獎項都已抽完！');
+  const pool = getPool();
+  if (!pool.length) return alert('沒有可抽的人員（請檢查權重或是否允許重複）');
+
+  isDrawing = true;
+  document.getElementById('drawBtn').disabled = true;
+  document.getElementById('drawAllBtn').disabled = true;
+  const display = document.getElementById('displayName');
+  display.classList.add('spinning');
+
+  const duration = 1800;
+  const interval = 60;
+  const start = Date.now();
+  const spin = setInterval(() => {
+    const random = pool[Math.floor(Math.random() * pool.length)];
+    display.textContent = random.name;
+    if (Date.now() - start > duration) {
+      clearInterval(spin);
+      const winner = weightedRandom(pool);
+      display.textContent = winner.name;
+      display.classList.remove('spinning');
+      display.classList.add('winner-reveal');
+      setTimeout(() => display.classList.remove('winner-reveal'), 600);
+
+      // 中獎後扣除 1 張抽獎券（權重 -1）
+      const winnerPerson = people.find(p => p.name === winner.name);
+      if (winnerPerson) {
+        winnerPerson.weight = Math.max(0, winnerPerson.weight - 1);
+      }
+
+      prize.winners.push(winner.name);
+      prize.remaining--;
+      if (prize.remaining <= 0) {
+        drawnPrizes.push({ ...prize, winners: [...prize.winners] });
+        prizes = prizes.filter(p => p.id !== prize.id);
+      }
+      save();
+      renderAll();
+      isDrawing = false;
+      document.getElementById('drawBtn').disabled = false;
+      document.getElementById('drawAllBtn').disabled = false;
+      for (let i = 0; i < 30; i++) {
+        const c = document.createElement('div');
+        c.className = 'confetti';
+        c.style.left = Math.random() * 100 + 'vw';
+        c.style.top = '-10px';
+        c.style.width = c.style.height = (6 + Math.random() * 8) + 'px';
+        c.style.background = ['#f59e0b','#ef4444','#10b981','#3b82f6','#ec4899'][Math.floor(Math.random()*5)];
+        c.style.borderRadius = '50%';
+        document.body.appendChild(c);
+        const anim = c.animate([
+          { transform: 'translateY(0) rotate(0deg)', opacity: 1 },
+          { transform: `translateY(${window.innerHeight + 20}px) rotate(${360 + Math.random()*360}deg)`, opacity: 0 }
+        ], { duration: 2000 + Math.random()*1000, easing: 'ease-in' });
+        anim.onfinish = () => c.remove();
+      }
+    }
+  }, interval);
+}
+
+function drawAllRemaining() {
+  const prize = getCurrentPrize();
+  if (!prize) return;
+  if (!confirm(`確定一次抽完「${prize.name}」剩餘 ${prize.remaining} 個名額？`)) return;
+  for (let i = 0; i < prize.remaining; i++) {
+    const pool = getPool();
+    if (!pool.length) break;
+    const winner = weightedRandom(pool);
+    // 中獎後扣除 1 張抽獎券（權重 -1）
+    const winnerPerson = people.find(p => p.name === winner.name);
+    if (winnerPerson) {
+      winnerPerson.weight = Math.max(0, winnerPerson.weight - 1);
+    }
+    prize.winners.push(winner.name);
+  }
+  prize.remaining = 0;
+  drawnPrizes.push({ ...prize, winners: [...prize.winners] });
+  prizes = prizes.filter(p => p.id !== prize.id);
+  save();
+  renderAll();
+  document.getElementById('displayName').textContent = '已抽完此獎項';
+}
+
+function clearResults() {
+  if (!confirm('清除所有已抽結果，獎項會回到待抽狀態？')) return;
+  drawnPrizes.forEach(dp => {
+    prizes.push({ id: dp.id || uid(), name: dp.name, quantity: dp.quantity, remaining: dp.quantity, winners: [] });
+  });
+  drawnPrizes = [];
+  save();
+  renderAll();
+}
+
+function resetAll() {
+  if (!confirm('確定全部重置？所有資料將清除。')) return;
+  prizes = [];
+  people = [];
+  drawnPrizes = [];
+  nextId = 1;
+  localStorage.removeItem('lotteryData');
+  renderAll();
+  document.getElementById('displayName').textContent = '點擊開始抽獎';
+}
+
+function exportResults() {
+  if (!drawnPrizes.length) return alert('還沒有抽獎結果');
+  const data = [];
+  drawnPrizes.forEach(dp => {
+    if (dp.winners && dp.winners.length) {
+      dp.winners.forEach((w, i) => {
+        data.push({ 獎項: dp.name, 得獎者: w, 序號: i + 1 });
+      });
+    } else {
+      data.push({ 獎項: dp.name, 得獎者: '（無人中獎）', 序號: '' });
+    }
+  });
+  const ws = XLSX.utils.json_to_sheet(data);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '抽獎結果');
+  XLSX.writeFile(wb, '抽獎結果.xlsx');
+}
+
+function dragStart(e, index) {
+  dragSrcIndex = index;
+  e.dataTransfer.effectAllowed = 'move';
+  e.target.classList.add('dragging');
+}
+
+function dragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  const item = e.target.closest('.prize-item');
+  if (item) item.classList.add('drag-over');
+}
+
+function dragLeave(e) {
+  const item = e.target.closest('.prize-item');
+  if (item) item.classList.remove('drag-over');
+}
+
+function drop(e, index) {
+  e.preventDefault();
+  const item = e.target.closest('.prize-item');
+  if (item) item.classList.remove('drag-over');
+  if (dragSrcIndex === null || dragSrcIndex === index) return;
+  const moved = prizes.splice(dragSrcIndex, 1)[0];
+  prizes.splice(index, 0, moved);
+  save();
+  renderAll();
+  dragSrcIndex = null;
+}
+
+function dragEnd(e) {
+  e.target.classList.remove('dragging');
+  document.querySelectorAll('.prize-item').forEach(el => el.classList.remove('drag-over'));
+}
+
+function renderPrizes() {
+  const el = document.getElementById('prizeList');
+  if (!prizes.length) {
+    el.innerHTML = '<div class="text-gray-400 text-center py-4">尚未新增獎項</div>';
+    return;
+  }
+  el.innerHTML = prizes.map((p, i) => `
+    <div class="prize-item flex items-center gap-2 p-3 bg-amber-50 rounded-lg border border-amber-100 cursor-move" 
+         draggable="true" 
+         ondragstart="dragStart(event, ${i})" 
+         ondragover="dragOver(event)" 
+         ondragleave="dragLeave(event)" 
+         ondrop="drop(event, ${i})" 
+         ondragend="dragEnd(event)"
+         onclick="moveToFront(${p.id})">
+      <span class="text-gray-400 mr-1">☰</span>
+      <div class="flex-1">
+        <span class="font-medium">${i+1}. ${p.name}</span>
+        <span class="text-sm text-gray-500 ml-2">剩餘 ${p.remaining}/${p.quantity}</span>
+        ${p.winners.length ? `<div class="text-xs text-amber-700 mt-1">已中：${p.winners.join('、')}</div>` : ''}
+      </div>
+      <button onclick="event.stopPropagation(); movePrize(${p.id}, -1)" class="px-2 py-1 text-gray-600 hover:bg-white rounded" ${i===0?'disabled':''}>↑</button>
+      <button onclick="event.stopPropagation(); movePrize(${p.id}, 1)" class="px-2 py-1 text-gray-600 hover:bg-white rounded" ${i===prizes.length-1?'disabled':''}>↓</button>
+      <button onclick="event.stopPropagation(); removePrize(${p.id})" class="px-2 py-1 text-red-500 hover:bg-red-50 rounded">刪</button>
+    </div>
+  `).join('');
+}
+
+function renderPeople() {
+  const el = document.getElementById('peopleList');
+  const stats = document.getElementById('peopleStats');
+  if (!people.length) {
+    el.innerHTML = '<div class="text-gray-400 text-center py-4">尚未新增人員</div>';
+    stats.textContent = '';
+    return;
+  }
+  const totalWeight = people.reduce((s, p) => s + (p.weight || 0), 0);
+  el.innerHTML = people.map(p => `
+    <div class="flex items-center gap-2 py-1.5 px-2 hover:bg-blue-50 rounded">
+      <span class="flex-1 font-medium">${p.name}</span>
+      <input type="number" min="0" step="0.1" value="${p.weight}" onchange="updateWeight(${p.id}, this.value)" class="w-16 px-2 py-0.5 border rounded text-sm">
+      <button onclick="removePerson(${p.id})" class="text-red-400 hover:text-red-600 text-xs">刪除</button>
+    </div>
+  `).join('');
+  stats.innerHTML = `共 <b>${people.length}</b> 人，總權重 <b>${totalWeight.toFixed(1)}</b>（權重 = 剩餘抽獎券）`;
+}
+
+function renderCurrent() {
+  const prize = getCurrentPrize();
+  const nameEl = document.getElementById('currentPrizeName');
+  const remainEl = document.getElementById('currentPrizeRemain');
+  if (prize) {
+    nameEl.textContent = prize.name;
+    remainEl.textContent = `剩餘 ${prize.remaining} / ${prize.quantity}`;
+  } else {
+    nameEl.textContent = prizes.length ? '全部抽完' : '尚未設定';
+    remainEl.textContent = '';
+  }
+}
+
+function renderDrawn() {
+  const el = document.getElementById('drawnList');
+  if (!drawnPrizes.length) {
+    el.innerHTML = '<div class="text-gray-400 text-center py-6">尚未有抽獎結果</div>';
+    return;
+  }
+  el.innerHTML = drawnPrizes.map(dp => `
+    <div class="p-4 bg-green-50 rounded-xl border border-green-100">
+      <div class="font-bold text-green-800 text-lg">${dp.name} <span class="text-sm font-normal text-gray-500">(${dp.quantity} 名)</span></div>
+      <div class="mt-2 text-sm">
+        ${dp.winners && dp.winners.length 
+          ? dp.winners.map(w => `<span class="inline-block bg-white px-3 py-1 rounded mr-1 mb-1 border text-gray-800">${w}</span>`).join('')
+          : '<span class="text-gray-500">無中獎者</span>'}
+      </div>
+    </div>
+  `).join('');
+}
+
+function renderAll() {
+  renderPrizes();
+  renderPeople();
+  renderCurrent();
+  renderDrawn();
+}
+
+document.getElementById('prizeName').addEventListener('keypress', e => { if (e.key === 'Enter') addPrize(); });
+document.getElementById('prizeQty').addEventListener('keypress', e => { if (e.key === 'Enter') addPrize(); });
+document.getElementById('personName').addEventListener('keypress', e => { if (e.key === 'Enter') addPerson(); });
+document.getElementById('personWeight').addEventListener('keypress', e => { if (e.key === 'Enter') addPerson(); });
+
+load();
+</script>
+</body>
+</html>
