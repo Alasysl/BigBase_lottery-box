@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BigBase抽獎系統</title>
+<title>🎉 Bigbase抽獎系統🐧</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <style>
@@ -39,8 +39,7 @@
 <body class="bg-gradient-to-br from-slate-50 to-blue-50 min-h-screen">
 <div class="max-w-7xl mx-auto p-4 md:p-6">
   <header class="text-center mb-8">
-    <h1 class="text-4xl md:text-5xl font-bold text-orange-500 leading-tight py-1">🎉 Bigbase抽獎系統</h1>
-    <p class="text-gray-600 mt-2">設定獎項順序（可拖移）、匯入獎項與人員、可重複中獎</p>
+    <h1 class="text-4xl md:text-5xl font-bold text-orange-500 leading-tight py-1">🎉 Bigbase抽獎系統🐧</h1>
   </header>
 
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -69,7 +68,7 @@
         <h2 class="text-2xl font-bold text-blue-700 mb-4">👥 抽獎人員</h2>
         <div class="flex flex-wrap gap-3 mb-4">
           <input id="personName" type="text" placeholder="姓名" class="flex-1 min-w-[120px] px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 outline-none">
-          <input id="personWeight" type="number" min="0.1" step="0.1" value="1" placeholder="權重" class="w-24 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 outline-none">
+          <input id="personWeight" type="number" min="1" step="1" value="1" placeholder="權重" class="w-24 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 outline-none">
           <button onclick="addPerson()" class="px-5 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-medium transition">新增人員</button>
         </div>
         <div class="flex items-center gap-3 mb-4">
@@ -192,7 +191,7 @@ function moveToFront(id) {
 
 function addPerson() {
   const name = document.getElementById('personName').value.trim();
-  const weight = parseFloat(document.getElementById('personWeight').value) || 1;
+  const weight = parseInt(document.getElementById('personWeight').value) || 1;
   if (!name) return alert('請輸入姓名');
   people.push({ id: uid(), name, weight });
   document.getElementById('personName').value = '';
@@ -209,7 +208,7 @@ function removePerson(id) {
 
 function updateWeight(id, val) {
   const p = people.find(x => x.id === id);
-  if (p) p.weight = parseFloat(val) || 1;
+  if (p) p.weight = parseInt(val) || 0;
   save();
   renderPeople();
 }
@@ -234,25 +233,42 @@ function importExcel(input) {
       const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
       if (!rows.length) return alert('檔案沒有資料');
 
-      let nameCol = 0, weightCol = -1;
+      let nameCol = 0;
+      let weightCol = 1; // 預設第二欄為權重
+      let start = 0;
+
       const header = rows[0].map(h => String(h).trim().toLowerCase());
       const nameKeys = ['姓名', '名字', 'name', '名稱', '人員'];
-      const weightKeys = ['權重', 'weight', '機率', '倍率'];
+      const weightKeys = ['權重', 'weight', '機率', '倍率', '抽獎券', '券', '張數'];
+
+      let hasHeader = false;
       header.forEach((h, i) => {
-        if (nameKeys.some(k => h.includes(k.toLowerCase()))) nameCol = i;
-        if (weightKeys.some(k => h.includes(k.toLowerCase()))) weightCol = i;
+        if (nameKeys.some(k => h.includes(k))) {
+          nameCol = i;
+          hasHeader = true;
+        }
+        if (weightKeys.some(k => h.includes(k))) {
+          weightCol = i;
+          hasHeader = true;
+        }
       });
 
-      const start = (header.some(h => nameKeys.some(k => h.includes(k.toLowerCase())) || weightKeys.some(k => h.includes(k.toLowerCase())))) ? 1 : 0;
+      if (hasHeader) start = 1;
+
       let added = 0;
       for (let i = start; i < rows.length; i++) {
         const row = rows[i];
+        if (!row || !row.length) continue;
         const name = String(row[nameCol] || '').trim();
         if (!name) continue;
+
         let weight = 1;
-        if (weightCol >= 0 && row[weightCol] !== '') {
-          weight = parseInt(row[weightCol]) || 1;
+        const rawWeight = row[weightCol];
+        if (rawWeight !== undefined && rawWeight !== null && rawWeight !== '') {
+          const parsed = parseInt(rawWeight);
+          if (!isNaN(parsed) && parsed > 0) weight = parsed;
         }
+
         people.push({ id: uid(), name, weight });
         added++;
       }
@@ -279,25 +295,42 @@ function importPrizes(input) {
       const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
       if (!rows.length) return alert('檔案沒有資料');
 
-      let nameCol = 0, qtyCol = -1;
+      let nameCol = 0;
+      let qtyCol = 1; // 預設第二欄為數量
+      let start = 0;
+
       const header = rows[0].map(h => String(h).trim().toLowerCase());
-      const nameKeys = ['獎項', '名稱', 'name', '獎品', '項目'];
-      const qtyKeys = ['數量', 'qty', 'quantity', '名額', '人數'];
+      const nameKeys = ['獎項', '名稱', 'name', '獎品', '項目', '獎'];
+      const qtyKeys = ['數量', 'qty', 'quantity', '名額', '人數', '個'];
+
+      let hasHeader = false;
       header.forEach((h, i) => {
-        if (nameKeys.some(k => h.includes(k.toLowerCase()))) nameCol = i;
-        if (qtyKeys.some(k => h.includes(k.toLowerCase()))) qtyCol = i;
+        if (nameKeys.some(k => h.includes(k))) {
+          nameCol = i;
+          hasHeader = true;
+        }
+        if (qtyKeys.some(k => h.includes(k))) {
+          qtyCol = i;
+          hasHeader = true;
+        }
       });
 
-      const start = (header.some(h => nameKeys.some(k => h.includes(k.toLowerCase())) || qtyKeys.some(k => h.includes(k.toLowerCase())))) ? 1 : 0;
+      if (hasHeader) start = 1;
+
       let added = 0;
       for (let i = start; i < rows.length; i++) {
         const row = rows[i];
+        if (!row || !row.length) continue;
         const name = String(row[nameCol] || '').trim();
         if (!name) continue;
+
         let qty = 1;
-        if (qtyCol >= 0 && row[qtyCol] !== '') {
-          qty = parseInt(row[qtyCol]) || 1;
+        const rawQty = row[qtyCol];
+        if (rawQty !== undefined && rawQty !== null && rawQty !== '') {
+          const parsed = parseInt(rawQty);
+          if (!isNaN(parsed) && parsed > 0) qty = parsed;
         }
+
         prizes.push({ id: uid(), name, quantity: qty, remaining: qty, winners: [] });
         added++;
       }
@@ -404,23 +437,80 @@ function drawAllRemaining() {
   const prize = getCurrentPrize();
   if (!prize) return;
   if (!confirm(`確定一次抽完「${prize.name}」剩餘 ${prize.remaining} 個名額？`)) return;
-  for (let i = 0; i < prize.remaining; i++) {
-    const pool = getPool();
-    if (!pool.length) break;
-    const winner = weightedRandom(pool);
-    // 中獎後扣除 1 張抽獎券（權重 -1）
-    const winnerPerson = people.find(p => p.name === winner.name);
-    if (winnerPerson) {
-      winnerPerson.weight = Math.max(0, winnerPerson.weight - 1);
+  if (isDrawing) return;
+
+  const totalToDraw = prize.remaining;
+  if (totalToDraw <= 0) return;
+
+  isDrawing = true;
+  document.getElementById('drawBtn').disabled = true;
+  document.getElementById('drawAllBtn').disabled = true;
+
+  let drawnCount = 0;
+
+  function drawNext() {
+    if (drawnCount >= totalToDraw) {
+      // 全部抽完
+      prize.remaining = 0;
+      drawnPrizes.push({ ...prize, winners: [...prize.winners] });
+      prizes = prizes.filter(p => p.id !== prize.id);
+      save();
+      renderAll();
+      isDrawing = false;
+      document.getElementById('drawBtn').disabled = false;
+      document.getElementById('drawAllBtn').disabled = false;
+      document.getElementById('displayName').textContent = '已抽完此獎項';
+      return;
     }
-    prize.winners.push(winner.name);
+
+    const pool = getPool();
+    if (!pool.length) {
+      // 沒人可抽了
+      prize.remaining = totalToDraw - drawnCount;
+      save();
+      renderAll();
+      isDrawing = false;
+      document.getElementById('drawBtn').disabled = false;
+      document.getElementById('drawAllBtn').disabled = false;
+      return;
+    }
+
+    const display = document.getElementById('displayName');
+    display.classList.add('spinning');
+
+    const duration = 1200;
+    const interval = 50;
+    const start = Date.now();
+    const spin = setInterval(() => {
+      const random = pool[Math.floor(Math.random() * pool.length)];
+      display.textContent = random.name;
+      if (Date.now() - start > duration) {
+        clearInterval(spin);
+        const winner = weightedRandom(pool);
+        display.textContent = winner.name;
+        display.classList.remove('spinning');
+        display.classList.add('winner-reveal');
+        setTimeout(() => display.classList.remove('winner-reveal'), 400);
+
+        // 扣除權重
+        const winnerPerson = people.find(p => p.name === winner.name);
+        if (winnerPerson) {
+          winnerPerson.weight = Math.max(0, winnerPerson.weight - 1);
+        }
+
+        prize.winners.push(winner.name);
+        prize.remaining--;
+        drawnCount++;
+        save();
+        renderAll();
+
+        // 短暫停留後抽下一個
+        setTimeout(drawNext, 600);
+      }
+    }, interval);
   }
-  prize.remaining = 0;
-  drawnPrizes.push({ ...prize, winners: [...prize.winners] });
-  prizes = prizes.filter(p => p.id !== prize.id);
-  save();
-  renderAll();
-  document.getElementById('displayName').textContent = '已抽完此獎項';
+
+  drawNext();
 }
 
 function clearResults() {
@@ -533,15 +623,20 @@ function renderPeople() {
     stats.textContent = '';
     return;
   }
-  const totalWeight = people.reduce((s, p) => s + (p.weight || 0), 0);
-  el.innerHTML = people.map(p => `
+  const totalWeight = people.reduce((s, p) => s + (Math.round(p.weight) || 0), 0);
+  el.innerHTML = people.map(p => {
+    const w = Math.round(p.weight) || 0;
+    const percent = totalWeight > 0 ? ((w / totalWeight) * 100).toFixed(1) : '0.0';
+    return `
     <div class="flex items-center gap-2 py-1.5 px-2 hover:bg-blue-50 rounded">
       <span class="flex-1 font-medium">${p.name}</span>
-      <input type="number" min="0" step="0.1" value="${p.weight}" onchange="updateWeight(${p.id}, this.value)" class="w-16 px-2 py-0.5 border rounded text-sm">
-      <button onclick="removePerson(${p.id})" class="text-red-400 hover:text-red-600 text-xs">刪除</button>
+      <input type="number" min="0" step="1" value="${w}" onchange="updateWeight(${p.id}, this.value)" class="w-16 px-2 py-0.5 border rounded text-sm text-center">
+      <span class="w-16 text-right text-sm text-blue-600 font-medium">${percent}%</span>
+      <button onclick="removePerson(${p.id})" class="text-red-400 hover:text-red-600 text-xs ml-1">刪除</button>
     </div>
-  `).join('');
-  stats.innerHTML = `共 <b>${people.length}</b> 人，總權重 <b>${totalWeight.toFixed(1)}</b>（權重 = 剩餘抽獎券）`;
+    `;
+  }).join('');
+  stats.innerHTML = `共 <b>${people.length}</b> 人，總權重 <b>${totalWeight}</b>（權重 = 剩餘抽獎券）`;
 }
 
 function renderCurrent() {
